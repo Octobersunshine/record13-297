@@ -1,12 +1,28 @@
 import json
+import math
 import sys
 
 
-def format_json(data, mode='pretty', indent=2):
+def _check_special_floats(obj, path='root'):
+    if isinstance(obj, float):
+        if math.isnan(obj):
+            raise ValueError(f"NaN is not valid JSON (found at {path})")
+        if math.isinf(obj):
+            raise ValueError(f"Infinity is not valid JSON (found at {path})")
+    elif isinstance(obj, dict):
+        for k, v in obj.items():
+            _check_special_floats(v, f"{path}.{k}")
+    elif isinstance(obj, list):
+        for i, v in enumerate(obj):
+            _check_special_floats(v, f"{path}[{i}]")
+
+
+def format_json(data, mode='pretty', indent=2, allow_nan=False, nan_str='NaN'):
+    _check_special_floats(data)
     if mode == 'pretty':
-        return json.dumps(data, indent=indent, ensure_ascii=False)
+        return json.dumps(data, indent=indent, ensure_ascii=False, allow_nan=allow_nan)
     elif mode == 'compact':
-        return json.dumps(data, separators=(',', ':'), ensure_ascii=False)
+        return json.dumps(data, separators=(',', ':'), ensure_ascii=False, allow_nan=allow_nan)
     else:
         raise ValueError(f"Unknown mode: {mode}. Use 'pretty' or 'compact'.")
 

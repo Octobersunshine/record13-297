@@ -17,6 +17,40 @@ def _check_special_floats(obj, path='root'):
             _check_special_floats(v, f"{path}[{i}]")
 
 
+def validate_json(json_str, source='<string>'):
+    try:
+        json.loads(json_str)
+        return None
+    except json.JSONDecodeError as e:
+        line_no = e.lineno
+        col_no = e.colno
+        lines = json_str.splitlines()
+        context = ''
+        if 1 <= line_no <= len(lines):
+            context = lines[line_no - 1]
+        pointer = ' ' * (col_no - 1) + '^'
+        return {
+            'message': e.msg,
+            'source': source,
+            'line': line_no,
+            'column': col_no,
+            'position': e.pos,
+            'context': context,
+            'pointer': pointer,
+        }
+
+
+def _format_validation_error(info):
+    parts = [
+        f"JSON syntax error in {info['source']}:",
+        f"  Line {info['line']}, Column {info['column']}: {info['message']}",
+    ]
+    if info['context']:
+        parts.append(f"  {info['context']}")
+        parts.append(f"  {info['pointer']}")
+    return '\n'.join(parts)
+
+
 def format_json(data, mode='pretty', indent=2, allow_nan=False, nan_str='NaN'):
     _check_special_floats(data)
     if mode == 'pretty':
@@ -50,7 +84,21 @@ def format_file(input_path, output_path=None, mode='pretty', indent=2):
 def main():
     import argparse
 
-    parser = argparse.ArgumentParser(description='JSON Formatter - beautify or compact JSON')
+    parser = argparse.ArgumentParser(description='JSON Formatter - beautify, compact, or validate JSON')
+    subparsers = parser.add_subparsers(dest='command')
+
+    fmt_parser = subparsers.add_parser('format', help='Format JSON (pretty or compact)')
+    fmt_parser.add_argument('-i', '--input', help='Input JSON file path')
+    fmt_parser.add_argument('-o', '--output', help='Output file path (optional, prints to stdout if not set)')
+    fmt_parser.add_argument('-m', '--mode', choices=['pretty', 'compact'], default='pretty',
+                            help='Format mode: pretty (indented) or compact (no spaces)')
+    fmt_parser.add_argument('--indent', type=int, default=2, help='Indentation spaces for pretty mode (default: 2)')
+    fmt_parser.add_argument('-s', '--string', help='JSON string to format directly')
+
+    val_parser = subparsers.add_parser('validate', help='Validate JSON syntax and report error location')
+    val_parser.add_argument('-i', '--input', help='Input JSON file path')
+    val_parser.add_argument('-s', '--string', help='JSON string to validate directly')
+
     parser.add_argument('-i', '--input', help='Input JSON file path')
     parser.add_argument('-o', '--output', help='Output file path (optional, prints to stdout if not set)')
     parser.add_argument('-m', '--mode', choices=['pretty', 'compact'], default='pretty',
@@ -61,18 +109,41 @@ def main():
     args = parser.parse_args()
 
     try:
-        if args.string:
-            result = format_json_string(args.string, mode=args.mode, indent=args.indent)
-            print(result)
-        elif args.input:
-            format_file(args.input, args.output, mode=args.mode, indent=args.indent)
-        else:
-            if sys.stdin.isatty():
-                parser.print_help()
+        if args.command == 'validate':
+            if args.input:
+                with open(args.input, 'r', encoding='utf-8') as f:
+                    json_str = f.read()
+                source = args.input
+            elif args.string:
+                json_str = args.string
+                source = '<string>'
+            else:
+                if sys.stdin.isatty():
+                    val_parser.print_help()
+                    sys.exit(1)
+                json_str = sys.stdin.read()
+                source = '<stdin>'
+
+            error = validate_json(json_str, source=source)
+            if error is None:
+                print("Valid JSON")
+            else:
+                print(_format_validation_error(error), file=sys.stderr)
                 sys.exit(1)
-            json_str = sys.stdin.read()
-            result = format_json_string(json_str, mode=args.mode, indent=args.indent)
-            print(result)
+
+        else:
+            if args.string:
+                result = format_json_string(args.string, mode=args.mode, indent=args.indent)
+                print(result)
+            elif args.input:
+                format_file(args.input, args.output, mode=args.mode, indent=args.indent)
+            else:
+                if sys.stdin.isatty():
+                    parser.print_help()
+                    sys.exit(1)
+                json_str = sys.stdin.read()
+                result = format_json_string(json_str, mode=args.mode, indent=args.indent)
+                print(result)
     except json.JSONDecodeError as e:
         print(f"Error: Invalid JSON - {e}", file=sys.stderr)
         sys.exit(1)
